@@ -74,8 +74,9 @@ export function run(input) {
     return [v, 2, v.length - prefix.length];
   }
 
-  // An unquoted field: one slice in the common case.
-  // Returns [value, ended] with ended as in readUnquotedSlow.
+  let fVal = '';
+  let fEnded = 2;
+  // An unquoted field: one slice in the common case; sets fVal/fEnded.
   function readUnquoted() {
     if (lineEnd < pos) {
       const nl = text.indexOf('\n', pos);
@@ -95,20 +96,21 @@ export function run(input) {
     if (cr === -1) {
       pos = ended === 2 ? fieldEnd : fieldEnd + 1;
       if (ended === 1) line += 1;
-      return [seg, ended];
+      fVal = seg; fEnded = ended;
+      return;
     }
     if (ended === 1 && cr === seg.length - 1) {
       // The CR of the closing CRLF.
       pos = fieldEnd + 1;
       line += 1;
-      return [seg.slice(0, -1), 1];
+      fVal = seg.slice(0, -1); fEnded = 1;
+      return;
     }
     const r = readUnquotedSlow('');
-    return [r[0], r[1]];
+    fVal = r[0]; fEnded = r[1];
   }
 
-  // A quoted field whose opening quote is at pos.
-  // Returns [value, ended] with ended as in readUnquotedSlow.
+  // A quoted field whose opening quote is at pos; sets fVal/fEnded.
   function readQuoted() {
     const open = pos;
     // Find the closing quote: the first quote that is not doubled.
@@ -132,7 +134,8 @@ export function run(input) {
       errors.push({ code: 'unterminated_quote', line: recordLine, row: recordRow });
       pos = open + 1;
       const r = readUnquotedSlow('"');
-      return [r[0], r[1]];
+      fVal = r[0]; fEnded = r[1];
+      return;
     }
     let value = text.slice(open + 1, close);
     const hasCR = value.indexOf('\r') !== -1;
@@ -146,26 +149,29 @@ export function run(input) {
       k = value.indexOf('\n', k + 1);
     }
     pos = close + 1;
-    if (pos >= len) return [value, 2];
+    if (pos >= len) { fVal = value; fEnded = 2; return; }
     const c = text.charCodeAt(pos);
     if (c === 44) {
       pos += 1;
-      return [value, 0];
+      fVal = value; fEnded = 0;
+      return;
     }
     if (c === 10) {
       pos += 1;
       line += 1;
-      return [value, 1];
+      fVal = value; fEnded = 1;
+      return;
     }
     if (c === 13 && pos + 1 < len && text.charCodeAt(pos + 1) === 10) {
       pos += 2;
       line += 1;
-      return [value, 1];
+      fVal = value; fEnded = 1;
+      return;
     }
     // What follows the closing quote is appended as it stands.
     const junk = readUnquotedSlow(value);
     if (junk[2] > 0) errors.push({ code: 'quote_junk', line: recordLine, row: recordRow });
-    return [junk[0], junk[1]];
+    fVal = junk[0]; fEnded = junk[1];
   }
 
   while (true) {
@@ -193,9 +199,9 @@ export function run(input) {
     let ended;
     do {
       lastQuoted = pos < len && text.charCodeAt(pos) === 34;
-      const f = lastQuoted ? readQuoted() : readUnquoted();
-      fields.push(f[0]);
-      ended = f[1];
+      if (lastQuoted) readQuoted(); else readUnquoted();
+      fields.push(fVal);
+      ended = fEnded;
     } while (ended === 0);
 
     // A line that held only stray CRs is no record (its errors stay).
